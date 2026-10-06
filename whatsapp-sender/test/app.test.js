@@ -90,3 +90,24 @@ test('one-time login token gives a session cookie, only once', async () => {
   assert.strictEqual((await fetch(base + '/api/state')).status, 401);
   app.server.close();
 });
+
+test('manual mode enforces consent, daily limit and repeat window', async () => {
+  const app = createApp({ password: 'pw', dailyLimit: 2, repeatDays: 7, dataFile: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'wa-')), 'd.json'), sent: {} });
+  await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
+  const base = 'http://127.0.0.1:' + app.server.address().port;
+  const H = { 'content-type': 'application/json', authorization: 'Basic ' + Buffer.from('u:pw').toString('base64') };
+  const call = async (m, p, b) => { const r = await fetch(base + p, { method: m, headers: H, body: b && JSON.stringify(b) }); return { s: r.status, j: await r.json() }; };
+  await call('POST', '/api/contacts', { contacts: [{ phone: '+201000000021' }, { phone: '+201000000022' }, { phone: '+201000000023' }], consentConfirmed: true });
+  await call('POST', '/api/contacts', { contacts: [{ phone: '+201000000024' }], consentConfirmed: false });
+  const cs = (await call('GET', '/api/state')).j.contacts;
+  const id = (p) => cs.find((c) => c.phone === p).id;
+  assert.strictEqual((await call('POST', `/api/manual/${id('+201000000024')}/opened`)).s, 403); // no consent
+  assert.strictEqual((await call('POST', `/api/manual/${id('+201000000021')}/opened`)).s, 200);
+  assert.strictEqual((await call('POST', `/api/manual/${id('+201000000021')}/opened`)).s, 409); // repeat window
+  await call('POST', `/api/contacts/${id('+201000000023')}/optout`);
+  assert.strictEqual((await call('POST', `/api/manual/${id('+201000000023')}/opened`)).s, 403); // opted out
+  assert.strictEqual((await call('POST', `/api/manual/${id('+201000000022')}/opened`)).s, 200);
+  assert.strictEqual((await call('POST', `/api/manual/${id('+201000000021')}/opened`)).s, 429); // daily cap hit (checked first)
+  assert.strictEqual((await call('GET', '/api/state')).j.manual.today, 2);
+  app.server.close();
+});

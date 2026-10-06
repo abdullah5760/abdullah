@@ -20,6 +20,9 @@ function createApp(opts = {}) {
     user: opts.user ?? process.env.APP_USER,
     dataFile: opts.dataFile ?? path.join(__dirname, 'data.json'),
     delayMs: Number(opts.delayMs ?? process.env.SEND_DELAY_MS ?? 1000),
+    dailyLimit: Number(opts.dailyLimit ?? process.env.DAILY_LIMIT ?? 40),
+    cooldownSec: Number(opts.cooldownSec ?? process.env.COOLDOWN_SEC ?? 20),
+    repeatDays: Number(opts.repeatDays ?? process.env.REPEAT_DAYS ?? 7),
     dryRun: opts.dryRun ?? (process.env.DRY_RUN || 'true') !== 'false'
   };
   if (!cfg.password) throw new Error('APP_PASSWORD is required');
@@ -33,8 +36,10 @@ function createApp(opts = {}) {
     throw new Error('SENT_API_KEY and SENT_SENDER_ID are required when DRY_RUN=false');
   }
 
-  let db = { contacts: [], templates: [], campaigns: [] };
+  let db = { contacts: [], templates: [], campaigns: [], manualLog: [] };
   try { db = JSON.parse(fs.readFileSync(cfg.dataFile, 'utf8')); } catch { /* fresh */ }
+  db.manualLog = db.manualLog || [];
+  const dayKey = (d) => new Date(d).toLocaleDateString('en-CA'); // local calendar day
   // A campaign left "running" by a crash is paused, never auto-resumed.
   for (const c of db.campaigns) if (c.status === 'running') c.status = 'interrupted';
   const save = () => {
@@ -106,7 +111,11 @@ function createApp(opts = {}) {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
         return res.end(fs.readFileSync(path.join(__dirname, 'public', 'index.html')));
       }
-      if (req.method === 'GET' && p === '/api/state') return send(res, 200, { ...db, dryRun: cfg.dryRun });
+      if (req.method === 'GET' && p === '/api/state') {
+        const today = dayKey(Date.now());
+        const manualToday = db.manualLog.filter((l) => dayKey(l.at) === today).length;
+        return send(res, 200, { ...db, dryRun: cfg.dryRun, manual: { dailyLimit: cfg.dailyLimit, cooldownSec: cfg.cooldownSec, repeatDays: cfg.repeatDays, today: manualToday } });
+      }
 
       if (req.method === 'POST' && p === '/api/contacts') {
         const b = await body(req);
@@ -175,6 +184,18 @@ function createApp(opts = {}) {
         // 'sending' means we don't know if it went out; never retry those automatically.
         for (const r of c.results) if (r.status === 'sending') { r.status = 'failed'; r.error = 'unknown outcome after crash'; }
         runCampaign(c); return send(res, 200, { ok: true });
+      }
+      if ((m = p.match(/^\/api\/manual\/([\w-]+)\/opened$/)) && req.method === 'POST') {
+        // Called right before the browser opens a wa.me chat; the server is the gatekeeper for consent and limits.
+        const c = db.contacts.find((x) => x.id === m[1]);
+        if (!c) return send(res, 404, { error: 'not found' });
+        if (!c.optIn || c.optOut) return send(res, 403, { error: 'no consent' });
+        const now = Date.now();
+        if (db.manualLog.filter((l) => dayKey(l.at) === dayKey(now)).length >= cfg.dailyLimit) return send(res, 429, { error: 'daily limit reached' });
+        const last = db.manualLog.filter((l) => l.contactId === c.id).pop();
+        if (last && now - new Date(last.at).getTime() < cfg.repeatDays * 864e5) return send(res, 409, { error: 'contacted recently' });
+        db.manualLog.push({ contactId: c.id, at: new Date(now).toISOString() }); save();
+        return send(res, 200, { ok: true });
       }
       send(res, 404, { error: 'not found' });
     } catch (e) { send(res, 400, { error: e.message }); }

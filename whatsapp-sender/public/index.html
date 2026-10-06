@@ -33,6 +33,18 @@ td.ltr{direction:ltr;text-align:right}.warn{color:#b7791f;font-size:13px}.err{co
 <header><h1>مرسل واتساب</h1><span id="mode" class="badge"></span></header>
 <nav id="nav"></nav>
 <main>
+<section id="manual">
+  <div class="card">
+    <b>إرسال يدوي من رقمك (فتح المحادثة)</b>
+    <p class="warn">البرنامج يجهّز المحادثة والرسالة، وأنت تضغط "إرسال" في واتساب بنفسك. لا حساب API ولا قالب. الحدود أدناه لحمايتك.</p>
+    <label>الرسالة (يمكن استخدام {name} و{phone} وأي حقل)</label>
+    <textarea id="mtext" style="direction:rtl;font-family:inherit" placeholder="مرحبًا {name}، ..."></textarea>
+    <div class="chk"><input type="checkbox" id="mfoot" checked><label for="mfoot" style="margin:0;color:var(--fg)">أضف سطر إلغاء الاشتراك في آخر الرسالة ("للإيقاف رد بكلمة إيقاف")</label></div>
+    <p id="mstat" class="warn"></p>
+  </div>
+  <div class="card"><table id="mtable"></table></div>
+</section>
+
 <section id="contacts">
   <div class="card">
     <b>استيراد جهات اتصال</b>
@@ -73,7 +85,7 @@ td.ltr{direction:ltr;text-align:right}.warn{color:#b7791f;font-size:13px}.err{co
 </main>
 <script>
 const $ = (s) => document.querySelector(s);
-const TABS = [['contacts','جهات الاتصال'],['templates','القوالب'],['campaigns','الحملات']];
+const TABS = [['manual','إرسال يدوي (آمن)'],['contacts','جهات الاتصال'],['templates','القوالب'],['campaigns','الحملات']];
 let S = {contacts:[],templates:[],campaigns:[]};
 const api = async (m, p, b) => {
   const r = await fetch(p, {method:m, headers:{'content-type':'application/json'}, body:b?JSON.stringify(b):undefined});
@@ -121,7 +133,30 @@ $('#cgo').onclick = async () => {
   if(!confirm(`إرسال "${t&&t.name}" إلى ${S.contacts.filter(c=>c.optIn&&!c.optOut).length} جهة اتصال؟`+(S.dryRun?'\n(وضع تجريبي: لن يُرسل شيء فعليًا)':''))) return;
   try{ await api('POST','/api/campaigns',{name:$('#cname').value,templateName:$('#csel').value,mapping}); $('#cmsg').textContent=''; load(); }catch(e){ $('#cmsg').textContent=e.message; }
 };
-function render(){
+const lastOpened = (id) => (S.manualLog||[]).filter(l=>l.contactId===id).pop();
+function renderMsg(text, c){ return text.replace(/\{(\w+)\}/g,(_,k)=>k==='name'?(c.name||''):k==='phone'?c.phone:((c.fields&&c.fields[k])||'')); }
+let cooldownUntil = 0;
+function renderManual(){
+  const M=S.manual||{}; const left=Math.max(0,(M.dailyLimit||0)-(M.today||0));
+  $('#mstat').textContent=`اليوم: ${M.today||0} من ${M.dailyLimit||0} | المتبقي: ${left} | فاصل ${M.cooldownSec}ث بين كل رسالة | لا تُكرَّر الرسالة لنفس الشخص قبل ${M.repeatDays} أيام`;
+  const tb=$('#mtable'); tb.replaceChildren(el('tr',{},['الاسم','الرقم','آخر مرة',''].map(h=>el('th',{textContent:h}))));
+  S.contacts.filter(c=>c.optIn&&!c.optOut).forEach(c=>{
+    const lo=lastOpened(c.id); const recent=lo&&(Date.now()-new Date(lo.at))<M.repeatDays*864e5;
+    const btn=el('button',{className:'sm',textContent:recent?'تم مؤخرًا':'فتح المحادثة',disabled:!!recent||left<=0});
+    btn.onclick=async()=>{
+      const txt=$('#mtext').value.trim(); if(!txt){alert('اكتب الرسالة أولًا');return}
+      if(Date.now()<cooldownUntil){alert('انتظر قليلًا بين الرسائل ('+Math.ceil((cooldownUntil-Date.now())/1000)+'ث)');return}
+      const w=window.open('about:blank','_blank'); if(w) w.opener=null;
+      try{ await api('POST',`/api/manual/${c.id}/opened`);
+        const full=renderMsg(txt,c)+($('#mfoot').checked?'\n\nللإيقاف رد بكلمة: إيقاف':'');
+        const url='https://wa.me/'+c.phone.replace('+','')+'?text='+encodeURIComponent(full);
+        if(w) w.location=url; else window.location=url;
+        cooldownUntil=Date.now()+M.cooldownSec*1000; load();
+      }catch(e){ if(w) w.close(); alert(e.message); } };
+    tb.append(el('tr',{},el('td',{textContent:c.name}),el('td',{className:'ltr',textContent:c.phone}),el('td',{textContent:lo?new Date(lo.at).toLocaleString('ar-EG'):'—'}),el('td',{},btn)));
+  });
+}
+function render(){ renderManual();
   const m=$('#mode'); m.textContent = S.dryRun?'وضع تجريبي (لا إرسال فعلي)':'إرسال فعلي'; m.className='badge '+(S.dryRun?'dry':'live');
   $('#ccount').textContent=S.contacts.length;
   const ct=$('#ctable'); ct.replaceChildren(el('tr',{},['الرقم','الاسم','الحالة',''].map(h=>el('th',{textContent:h}))));
@@ -147,7 +182,7 @@ function render(){
 }
 async function load(){ S = await api('GET','/api/state'); render(); }
 setInterval(()=>{ if(S.campaigns.some(c=>c.status==='running')) load(); },2000);
-let t='contacts'; try{ t=localStorage.tab||t }catch{} show(t); load();
+let t='manual'; try{ t=localStorage.tab||t }catch{} show(t); load();
 </script>
 </body>
 </html>
