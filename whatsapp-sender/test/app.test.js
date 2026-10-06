@@ -111,3 +111,24 @@ test('manual mode enforces consent, daily limit and repeat window', async () => 
   assert.strictEqual((await call('GET', '/api/state')).j.manual.today, 2);
   app.server.close();
 });
+
+test('meta client builds the documented request and parses the id', async () => {
+  const { createMetaClient } = require('../meta');
+  let seen;
+  const fetchImpl = async (url, init) => { seen = { url, init }; return { ok: true, status: 200, text: async () => JSON.stringify({ messages: [{ id: 'wamid.X' }] }) }; };
+  const c = createMetaClient({ token: 'T', phoneNumberId: '123', dryRun: false, fetchImpl });
+  const out = await c.sendWhatsApp({ phone: '+201000000001', templateName: 'promo', templateLang: 'ar', paramOrder: ['name', 'city'], parameters: { city: 'Cairo', name: 'Ali' } });
+  assert.strictEqual(out.messageId, 'wamid.X');
+  assert.strictEqual(seen.url, 'https://graph.facebook.com/v23.0/123/messages');
+  assert.strictEqual(seen.init.headers.authorization, 'Bearer T');
+  const b = JSON.parse(seen.init.body);
+  assert.strictEqual(b.messaging_product, 'whatsapp');
+  assert.strictEqual(b.to, '201000000001');
+  assert.deepStrictEqual(b.template, { name: 'promo', language: { code: 'ar' }, components: [{ type: 'body', parameters: [{ type: 'text', text: 'Ali' }, { type: 'text', text: 'Cairo' }] }] });
+  const bad = createMetaClient({ token: 'T', phoneNumberId: '1', dryRun: false, fetchImpl: async () => ({ ok: false, status: 400, text: async () => JSON.stringify({ error: { message: 'Template not found' } }) }) });
+  await assert.rejects(() => bad.sendWhatsApp({ phone: '+2010', templateName: 'x' }), /Meta 400: Template not found/);
+});
+
+test('live mode without Meta credentials refuses to start', () => {
+  assert.throws(() => createApp({ password: 'pw', dryRun: false, provider: 'meta', dataFile: path.join(os.tmpdir(), 'x-none.json') }), /META_TOKEN/);
+});

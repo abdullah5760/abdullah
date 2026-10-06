@@ -65,7 +65,8 @@ td.ltr{direction:ltr;text-align:right}.warn{color:#b7791f;font-size:13px}.err{co
     <b>إضافة قالب</b>
     <p class="warn">يجب أن يكون القالب موجودًا ومعتمدًا في حساب Sent بنفس الاسم تمامًا، وأن تكتب أسماء متغيراته كما هي في Sent.</p>
     <label>اسم القالب</label><input id="tname" dir="ltr">
-    <label>أسماء المتغيرات مفصولة بفاصلة (اتركه فارغًا لو بلا متغيرات)</label><input id="tparams" dir="ltr" placeholder="name,city">
+    <label>رمز لغة القالب كما في Meta (مثال: ar أو en_US)</label><input id="tlang" dir="ltr" value="ar">
+    <label>أسماء المتغيرات بنفس ترتيب {{1}} {{2}} في القالب، مفصولة بفاصلة (اتركه فارغًا لو بلا متغيرات)</label><input id="tparams" dir="ltr" placeholder="name,city">
     <button class="pri" id="tadd">حفظ</button>
   </div>
   <div class="card"><table id="ttable"></table></div>
@@ -119,7 +120,7 @@ $('#imp').onclick = async () => {
   }catch(e){ $('#impmsg').textContent=e.message; }
 };
 $('#tadd').onclick = async () => {
-  try{ await api('POST','/api/templates',{name:$('#tname').value,params:$('#tparams').value.split(',').map(s=>s.trim())}); $('#tname').value=$('#tparams').value=''; load(); }catch(e){alert(e.message)}
+  try{ await api('POST','/api/templates',{name:$('#tname').value,params:$('#tparams').value.split(',').map(s=>s.trim()),lang:$('#tlang').value}); $('#tname').value=$('#tparams').value=''; load(); }catch(e){alert(e.message)}
 };
 function renderMap(){
   const t = S.templates.find(x=>x.name===$('#csel').value); const box=$('#cmap'); box.replaceChildren();
@@ -157,7 +158,7 @@ function renderManual(){
   });
 }
 function render(){ renderManual();
-  const m=$('#mode'); m.textContent = S.dryRun?'وضع تجريبي (لا إرسال فعلي)':'إرسال فعلي'; m.className='badge '+(S.dryRun?'dry':'live');
+  const m=$('#mode'); m.textContent = (S.dryRun?'وضع تجريبي (لا إرسال فعلي)':'إرسال فعلي')+' — '+(S.provider==='sent'?'Sent':'Meta'); m.className='badge '+(S.dryRun?'dry':'live');
   $('#ccount').textContent=S.contacts.length;
   const ct=$('#ctable'); ct.replaceChildren(el('tr',{},['الرقم','الاسم','الحالة',''].map(h=>el('th',{textContent:h}))));
   S.contacts.forEach(c=>{ const st=c.optOut?'ألغى الاشتراك':c.optIn?'موافق':'بدون موافقة';
@@ -165,7 +166,7 @@ function render(){ renderManual();
       el('td',{},c.optOut?'':el('button',{className:'sm',textContent:'إلغاء اشتراك',onclick:async()=>{await api('POST',`/api/contacts/${c.id}/optout`);load()}}),' ',
         el('button',{className:'sm bad',textContent:'حذف',onclick:async()=>{if(confirm('حذف؟')){await api('DELETE','/api/contacts/'+c.id);load()}}})))); });
   const tt=$('#ttable'); tt.replaceChildren(el('tr',{},['القالب','المتغيرات',''].map(h=>el('th',{textContent:h}))));
-  S.templates.forEach(t=>tt.append(el('tr',{},el('td',{className:'ltr',textContent:t.name}),el('td',{className:'ltr',textContent:t.params.join(', ')||'—'}),
+  S.templates.forEach(t=>tt.append(el('tr',{},el('td',{className:'ltr',textContent:t.name}),el('td',{className:'ltr',textContent:(t.lang||'ar')+' | '+(t.params.join(', ')||'—')}),
     el('td',{},el('button',{className:'sm bad',textContent:'حذف',onclick:async()=>{await api('DELETE','/api/templates/'+t.id);load()}})))));
   const sel=$('#csel'), cur=sel.value; sel.replaceChildren(...S.templates.map(t=>el('option',{value:t.name,textContent:t.name}))); if(cur) sel.value=cur;
   if(!$('#cmap').children.length) renderMap();

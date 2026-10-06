@@ -5,6 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { normalizePhone, buildParameters, safeEqual } = require('./lib');
 const { createSentClient } = require('./sent');
+const { createMetaClient } = require('./meta');
 
 // Minimal .env loader (no dependencies)
 try {
@@ -26,14 +27,15 @@ function createApp(opts = {}) {
     dryRun: opts.dryRun ?? (process.env.DRY_RUN || 'true') !== 'false'
   };
   if (!cfg.password) throw new Error('APP_PASSWORD is required');
-  const sent = opts.sent ?? createSentClient({
-    baseUrl: process.env.SENT_BASE_URL || 'https://api.sent.dm',
-    apiKey: process.env.SENT_API_KEY,
-    senderId: process.env.SENT_SENDER_ID,
-    dryRun: cfg.dryRun
-  });
-  if (!cfg.dryRun && !opts.sent && !(process.env.SENT_API_KEY && process.env.SENT_SENDER_ID)) {
-    throw new Error('SENT_API_KEY and SENT_SENDER_ID are required when DRY_RUN=false');
+  const provider = (opts.provider ?? process.env.PROVIDER ?? 'meta').toLowerCase();
+  const env = process.env;
+  const sent = opts.sent ?? (provider === 'sent'
+    ? createSentClient({ baseUrl: env.SENT_BASE_URL || 'https://api.sent.dm', apiKey: env.SENT_API_KEY, senderId: env.SENT_SENDER_ID, dryRun: cfg.dryRun })
+    : createMetaClient({ token: env.META_TOKEN, phoneNumberId: env.META_PHONE_NUMBER_ID, apiVersion: env.META_API_VERSION || 'v23.0', dryRun: cfg.dryRun }));
+  if (!cfg.dryRun && !opts.sent) {
+    const need = provider === 'sent' ? ['SENT_API_KEY', 'SENT_SENDER_ID'] : ['META_TOKEN', 'META_PHONE_NUMBER_ID'];
+    const miss = need.filter((k) => !env[k]);
+    if (miss.length) throw new Error(`${miss.join(' and ')} required when DRY_RUN=false (PROVIDER=${provider})`);
   }
 
   let db = { contacts: [], templates: [], campaigns: [], manualLog: [] };
@@ -62,6 +64,7 @@ function createApp(opts = {}) {
         if (r.status !== 'pending') continue;
         if (camp.status === 'cancelled') break;
         const contact = db.contacts.find((c) => c.id === r.contactId);
+        const tpl = db.templates.find((t) => t.name === camp.templateName) || {};
         // Re-check consent at send time: opt-out after campaign creation must win.
         if (!contact || !contact.optIn || contact.optOut) { r.status = 'skipped'; r.error = 'no consent'; save(); continue; }
         r.status = 'sending'; save(); // persisted first so a crash can never double-send
@@ -69,6 +72,8 @@ function createApp(opts = {}) {
           const out = await sent.sendWhatsApp({
             phone: contact.phone,
             templateName: camp.templateName,
+            templateLang: tpl.lang || 'ar',
+            paramOrder: tpl.params || [],
             parameters: buildParameters(camp.mapping, contact)
           });
           r.status = 'accepted'; r.messageId = out.messageId; // accepted != delivered
@@ -114,7 +119,7 @@ function createApp(opts = {}) {
       if (req.method === 'GET' && p === '/api/state') {
         const today = dayKey(Date.now());
         const manualToday = db.manualLog.filter((l) => dayKey(l.at) === today).length;
-        return send(res, 200, { ...db, dryRun: cfg.dryRun, manual: { dailyLimit: cfg.dailyLimit, cooldownSec: cfg.cooldownSec, repeatDays: cfg.repeatDays, today: manualToday } });
+        return send(res, 200, { ...db, provider, dryRun: cfg.dryRun, manual: { dailyLimit: cfg.dailyLimit, cooldownSec: cfg.cooldownSec, repeatDays: cfg.repeatDays, today: manualToday } });
       }
 
       if (req.method === 'POST' && p === '/api/contacts') {
@@ -151,7 +156,7 @@ function createApp(opts = {}) {
         if (!name) return send(res, 400, { error: 'name required' });
         const params = (Array.isArray(b.params) ? b.params : []).map(String).filter(Boolean);
         db.templates = db.templates.filter((t) => t.name !== name);
-        db.templates.push({ id: id(), name, params }); save(); return send(res, 200, { ok: true });
+        db.templates.push({ id: id(), name, params, lang: String(b.lang || 'ar').trim() || 'ar' }); save(); return send(res, 200, { ok: true });
       }
       if ((m = p.match(/^\/api\/templates\/([\w-]+)$/)) && req.method === 'DELETE') {
         db.templates = db.templates.filter((t) => t.id !== m[1]); save(); return send(res, 200, { ok: true });
