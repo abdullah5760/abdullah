@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>مرسل واتساب</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1c2330;--mut:#667085;--bd:#e3e6ec;--ac:#128c4a;--bad:#c0392b}
+@media(prefers-color-scheme:dark){:root{--bg:#12161c;--card:#1b212b;--fg:#e8ecf2;--mut:#98a2b3;--bd:#2c3441;--ac:#2fb36a;--bad:#ff6b5b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,"Segoe UI",Tahoma,sans-serif}
+header{padding:14px 16px;border-bottom:1px solid var(--bd);background:var(--card);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+h1{font-size:18px;margin:0}.badge{padding:2px 10px;border-radius:99px;font-size:12px;border:1px solid var(--bd);color:var(--mut)}
+.badge.dry{color:#b7791f;border-color:#b7791f}.badge.live{color:var(--bad);border-color:var(--bad)}
+nav{display:flex;gap:6px;padding:10px 16px;flex-wrap:wrap}
+nav button{background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:6px 14px;cursor:pointer}
+nav button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+main{padding:0 16px 40px;max-width:980px;margin:auto}
+section{display:none}section.on{display:block}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px;margin:12px 0}
+label{display:block;margin:8px 0 3px;color:var(--mut);font-size:13px}
+input,textarea,select{width:100%;padding:8px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+textarea{min-height:110px;direction:ltr;font-family:monospace}
+button.pri{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:8px 16px;cursor:pointer;margin-top:10px}
+button.sm{background:none;border:1px solid var(--bd);color:var(--fg);border-radius:6px;padding:2px 8px;cursor:pointer}
+button.sm.bad{color:var(--bad)}
+table{width:100%;border-collapse:collapse}th,td{text-align:start;padding:6px 8px;border-bottom:1px solid var(--bd);font-size:14px}
+td.ltr{direction:ltr;text-align:right}.warn{color:#b7791f;font-size:13px}.err{color:var(--bad)}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:160px}
+.chk{display:flex;gap:8px;align-items:flex-start;margin-top:10px}.chk input{width:auto;margin-top:5px}
+</style>
+</head>
+<body>
+<header><h1>مرسل واتساب</h1><span id="mode" class="badge"></span></header>
+<nav id="nav"></nav>
+<main>
+<section id="contacts">
+  <div class="card">
+    <b>استيراد جهات اتصال</b>
+    <label>الصق CSV: العمود الأول الرقم، الثاني الاسم، والباقي حقول اختيارية (الصف الأول عناوين: phone,name,city…)</label>
+    <textarea id="csv" placeholder="phone,name,city&#10;01012345678,أحمد,القاهرة"></textarea>
+    <div class="row">
+      <div><label>كود الدولة للأرقام التي تبدأ بصفر (مثال: 20 لمصر)</label><input id="cc" value="20" inputmode="numeric"></div>
+      <div><label>مصدر الموافقة (مثال: نموذج الموقع 2026-09)</label><input id="src"></div>
+    </div>
+    <div class="chk"><input type="checkbox" id="consent"><label for="consent" style="margin:0;color:var(--fg)">أؤكد أن أصحاب هذه الأرقام وافقوا صراحةً على استلام رسائل تسويقية منّي على واتساب. بدون التأكيد تُحفظ الأرقام لكن <b>لن تُرسل لها</b> أي رسالة.</label></div>
+    <button class="pri" id="imp">استيراد</button> <span id="impmsg"></span>
+  </div>
+  <div class="card"><b>جهات الاتصال (<span id="ccount">0</span>)</b><table id="ctable"></table></div>
+</section>
+
+<section id="templates">
+  <div class="card">
+    <b>إضافة قالب</b>
+    <p class="warn">يجب أن يكون القالب موجودًا ومعتمدًا في حساب Sent بنفس الاسم تمامًا، وأن تكتب أسماء متغيراته كما هي في Sent.</p>
+    <label>اسم القالب</label><input id="tname" dir="ltr">
+    <label>أسماء المتغيرات مفصولة بفاصلة (اتركه فارغًا لو بلا متغيرات)</label><input id="tparams" dir="ltr" placeholder="name,city">
+    <button class="pri" id="tadd">حفظ</button>
+  </div>
+  <div class="card"><table id="ttable"></table></div>
+</section>
+
+<section id="campaigns">
+  <div class="card">
+    <b>حملة جديدة</b>
+    <label>اسم الحملة</label><input id="cname">
+    <label>القالب</label><select id="csel"></select>
+    <div id="cmap"></div>
+    <p class="warn" id="ctarget"></p>
+    <button class="pri" id="cgo">ابدأ الإرسال</button> <span id="cmsg" class="err"></span>
+  </div>
+  <div id="clist"></div>
+</section>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const TABS = [['contacts','جهات الاتصال'],['templates','القوالب'],['campaigns','الحملات']];
+let S = {contacts:[],templates:[],campaigns:[]};
+const api = async (m, p, b) => {
+  const r = await fetch(p, {method:m, headers:{'content-type':'application/json'}, body:b?JSON.stringify(b):undefined});
+  const j = await r.json(); if (!r.ok) throw new Error(j.error||r.status); return j;
+};
+function el(tag, props={}, ...kids){ const e=document.createElement(tag); Object.assign(e,props); kids.flat().forEach(k=>e.append(k)); return e; }
+
+TABS.forEach(([id,t],i)=>{ const b=el('button',{textContent:t}); b.onclick=()=>show(id); b.dataset.t=id; $('#nav').append(b); });
+function show(id){ document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===id));
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===id)); try{localStorage.tab=id}catch{} }
+
+function parseCSV(text){
+  const rows=[]; let row=[],cur='',q=false;
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(q){ if(c==='"'&&text[i+1]==='"'){cur+='"';i++} else if(c==='"') q=false; else cur+=c; }
+    else if(c==='"') q=true; else if(c===','){row.push(cur);cur=''}
+    else if(c==='\n'||c==='\r'){ if(c==='\r'&&text[i+1]==='\n') i++; row.push(cur);cur=''; if(row.some(x=>x.trim())) rows.push(row); row=[]; }
+    else cur+=c; }
+  row.push(cur); if(row.some(x=>x.trim())) rows.push(row); return rows;
+}
+$('#imp').onclick = async () => {
+  const rows = parseCSV($('#csv').value); if(!rows.length) return;
+  const head = rows[0].map(h=>h.trim().toLowerCase());
+  const hasHead = head[0]==='phone';
+  const cols = hasHead ? rows[0].map(h=>h.trim()) : ['phone','name'];
+  const data = (hasHead?rows.slice(1):rows).map(r=>{ const fields={}; cols.slice(2).forEach((k,i)=>{ if(r[i+2]) fields[k]=r[i+2].trim(); }); return {phone:r[0],name:(r[1]||'').trim(),fields}; });
+  try{
+    const r = await api('POST','/api/contacts',{contacts:data,defaultCc:$('#cc').value.trim(),consentConfirmed:$('#consent').checked,consentSource:$('#src').value});
+    $('#impmsg').textContent = `أضيف ${r.added}، ورُفض ${r.rejected.length}` + (r.rejected.length? ' ('+[...new Set(r.rejected.map(x=>x.reason))].join('، ')+')':'');
+    $('#csv').value=''; load();
+  }catch(e){ $('#impmsg').textContent=e.message; }
+};
+$('#tadd').onclick = async () => {
+  try{ await api('POST','/api/templates',{name:$('#tname').value,params:$('#tparams').value.split(',').map(s=>s.trim())}); $('#tname').value=$('#tparams').value=''; load(); }catch(e){alert(e.message)}
+};
+function renderMap(){
+  const t = S.templates.find(x=>x.name===$('#csel').value); const box=$('#cmap'); box.replaceChildren();
+  if(!t) return;
+  t.params.forEach(p=>{ box.append(el('label',{textContent:`قيمة المتغير ${p} (يمكن استخدام {name} {phone} أو أي حقل مثل {city})`}), el('input',{dir:'ltr',id:'m_'+p,value:p==='name'?'{name}':''})); });
+}
+$('#csel').onchange = renderMap;
+$('#cgo').onclick = async () => {
+  const t = S.templates.find(x=>x.name===$('#csel').value); const mapping={};
+  (t?t.params:[]).forEach(p=>mapping[p]=$('#m_'+p).value);
+  if(!confirm(`إرسال "${t&&t.name}" إلى ${S.contacts.filter(c=>c.optIn&&!c.optOut).length} جهة اتصال؟`+(S.dryRun?'\n(وضع تجريبي: لن يُرسل شيء فعليًا)':''))) return;
+  try{ await api('POST','/api/campaigns',{name:$('#cname').value,templateName:$('#csel').value,mapping}); $('#cmsg').textContent=''; load(); }catch(e){ $('#cmsg').textContent=e.message; }
+};
+function render(){
+  const m=$('#mode'); m.textContent = S.dryRun?'وضع تجريبي (لا إرسال فعلي)':'إرسال فعلي'; m.className='badge '+(S.dryRun?'dry':'live');
+  $('#ccount').textContent=S.contacts.length;
+  const ct=$('#ctable'); ct.replaceChildren(el('tr',{},['الرقم','الاسم','الحالة',''].map(h=>el('th',{textContent:h}))));
+  S.contacts.forEach(c=>{ const st=c.optOut?'ألغى الاشتراك':c.optIn?'موافق':'بدون موافقة';
+    ct.append(el('tr',{},el('td',{className:'ltr',textContent:c.phone}),el('td',{textContent:c.name}),el('td',{textContent:st}),
+      el('td',{},c.optOut?'':el('button',{className:'sm',textContent:'إلغاء اشتراك',onclick:async()=>{await api('POST',`/api/contacts/${c.id}/optout`);load()}}),' ',
+        el('button',{className:'sm bad',textContent:'حذف',onclick:async()=>{if(confirm('حذف؟')){await api('DELETE','/api/contacts/'+c.id);load()}}})))); });
+  const tt=$('#ttable'); tt.replaceChildren(el('tr',{},['القالب','المتغيرات',''].map(h=>el('th',{textContent:h}))));
+  S.templates.forEach(t=>tt.append(el('tr',{},el('td',{className:'ltr',textContent:t.name}),el('td',{className:'ltr',textContent:t.params.join(', ')||'—'}),
+    el('td',{},el('button',{className:'sm bad',textContent:'حذف',onclick:async()=>{await api('DELETE','/api/templates/'+t.id);load()}})))));
+  const sel=$('#csel'), cur=sel.value; sel.replaceChildren(...S.templates.map(t=>el('option',{value:t.name,textContent:t.name}))); if(cur) sel.value=cur;
+  if(!$('#cmap').children.length) renderMap();
+  const n=S.contacts.filter(c=>c.optIn&&!c.optOut).length;
+  $('#ctarget').textContent=`سيُرسل فقط إلى الموافقين: ${n} من ${S.contacts.length}`;
+  const cl=$('#clist'); cl.replaceChildren();
+  [...S.campaigns].reverse().forEach(c=>{ const cnt=k=>c.results.filter(r=>r.status===k).length;
+    const failed=c.results.filter(r=>r.status==='failed');
+    cl.append(el('div',{className:'card'},el('b',{textContent:`${c.name} — ${c.templateName}`}),el('div',{textContent:`الحالة: ${c.status} | مقبول من Sent: ${cnt('accepted')} | فشل: ${cnt('failed')} | متخطى: ${cnt('skipped')} | منتظر: ${cnt('pending')}`}),
+      el('div',{className:'warn',textContent:'"مقبول" يعني أن Sent استلم الرسالة، وليس أنها وصلت.'}),
+      failed.slice(0,5).map(r=>el('div',{className:'err',textContent:`${r.phone}: ${r.error}`})),
+      c.status==='running'?el('button',{className:'sm',textContent:'إيقاف',onclick:async()=>{await api('POST',`/api/campaigns/${c.id}/cancel`);load()}}):'',
+      c.status==='interrupted'?el('button',{className:'sm',textContent:'استئناف',onclick:async()=>{await api('POST',`/api/campaigns/${c.id}/resume`);load()}}):'')); });
+}
+async function load(){ S = await api('GET','/api/state'); render(); }
+setInterval(()=>{ if(S.campaigns.some(c=>c.status==='running')) load(); },2000);
+let t='contacts'; try{ t=localStorage.tab||t }catch{} show(t); load();
+</script>
+</body>
+</html>
