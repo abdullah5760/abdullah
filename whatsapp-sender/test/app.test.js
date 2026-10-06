@@ -75,3 +75,18 @@ test('APP_USER enforced when set (including Arabic names)', async () => {
   assert.strictEqual(await hit('رعد', 'bad'), 401);
   app.server.close();
 });
+
+test('one-time login token gives a session cookie, only once', async () => {
+  const app = createApp({ password: 'pw', loginToken: 'tok', dataFile: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'wa-')), 'd.json'), sent: {} });
+  await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
+  const base = 'http://127.0.0.1:' + app.server.address().port;
+  const bad = await fetch(base + '/?login=nope', { redirect: 'manual' });
+  assert.strictEqual(bad.status, 401);
+  const ok = await fetch(base + '/?login=tok', { redirect: 'manual' });
+  assert.strictEqual(ok.status, 302);
+  const cookie = ok.headers.get('set-cookie').split(';')[0];
+  assert.strictEqual((await fetch(base + '/api/state', { headers: { cookie } })).status, 200);
+  assert.strictEqual((await fetch(base + '/?login=tok', { redirect: 'manual' })).status, 401); // token burned
+  assert.strictEqual((await fetch(base + '/api/state')).status, 401);
+  app.server.close();
+});

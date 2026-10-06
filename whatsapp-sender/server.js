@@ -45,6 +45,8 @@ function createApp(opts = {}) {
   const id = () => crypto.randomUUID();
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const running = new Set();
+  const sessions = new Set();
+  let loginToken = opts.loginToken || null; // one-time token used by the local launcher to skip the login prompt
 
   async function runCampaign(camp) {
     if (running.has(camp.id)) return;
@@ -82,11 +84,19 @@ function createApp(opts = {}) {
   const send = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
 
   const server = http.createServer(async (req, res) => {
+    const u0 = new URL(req.url, 'http://x');
+    if (loginToken && req.method === 'GET' && u0.pathname === '/' && u0.searchParams.get('login') && safeEqual(u0.searchParams.get('login'), loginToken)) {
+      loginToken = null; // single use
+      const sid = crypto.randomBytes(24).toString('hex'); sessions.add(sid);
+      res.writeHead(302, { 'Set-Cookie': `wa_session=${sid}; HttpOnly; SameSite=Strict; Path=/`, Location: '/' }); return res.end();
+    }
+    const m0 = /(?:^|;\s*)wa_session=([0-9a-f]+)/.exec(req.headers.cookie || '');
+    const hasSession = !!(m0 && sessions.has(m0[1]));
     const auth = req.headers.authorization || '';
     const cred = auth.startsWith('Basic ') ? Buffer.from(auth.slice(6), 'base64').toString('utf8') : '';
     const user = cred.split(':')[0], pass = cred.split(':').slice(1).join(':');
     // APP_USER is optional; when unset any username is accepted.
-    if (!safeEqual(pass, cfg.password) || (cfg.user && !safeEqual(user, cfg.user))) {
+    if (!hasSession && (!safeEqual(pass, cfg.password) || (cfg.user && !safeEqual(user, cfg.user)))) {
       res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="whatsapp-sender"' }); return res.end('Auth required');
     }
     const url = new URL(req.url, 'http://x');
