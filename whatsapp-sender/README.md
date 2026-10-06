@@ -9,7 +9,7 @@
 ## التشغيل اليدوي
 ```
 cp .env.example .env     # عدّل APP_PASSWORD وبيانات Sent
-npm start                # http://127.0.0.1:3000  (اسم المستخدم أي شيء، كلمة المرور APP_PASSWORD)
+npm start                # http://127.0.0.1:3000  (اسم المستخدم APP_USER إن حُدِّد وإلا أي شيء، وكلمة المرور APP_PASSWORD)
 npm test
 ```
 الوضع الافتراضي `DRY_RUN=true`: لا يُرسل شيء، ويطبع ما كان سيُرسل. غيّره إلى `false` بعد اختبار حسابك.

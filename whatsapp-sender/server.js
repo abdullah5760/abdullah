@@ -17,6 +17,7 @@ try {
 function createApp(opts = {}) {
   const cfg = {
     password: opts.password ?? process.env.APP_PASSWORD,
+    user: opts.user ?? process.env.APP_USER,
     dataFile: opts.dataFile ?? path.join(__dirname, 'data.json'),
     delayMs: Number(opts.delayMs ?? process.env.SEND_DELAY_MS ?? 1000),
     dryRun: opts.dryRun ?? (process.env.DRY_RUN || 'true') !== 'false'
@@ -82,8 +83,10 @@ function createApp(opts = {}) {
 
   const server = http.createServer(async (req, res) => {
     const auth = req.headers.authorization || '';
-    const pass = auth.startsWith('Basic ') ? Buffer.from(auth.slice(6), 'base64').toString().split(':').slice(1).join(':') : '';
-    if (!safeEqual(pass, cfg.password)) {
+    const cred = auth.startsWith('Basic ') ? Buffer.from(auth.slice(6), 'base64').toString('utf8') : '';
+    const user = cred.split(':')[0], pass = cred.split(':').slice(1).join(':');
+    // APP_USER is optional; when unset any username is accepted.
+    if (!safeEqual(pass, cfg.password) || (cfg.user && !safeEqual(user, cfg.user))) {
       res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="whatsapp-sender"' }); return res.end('Auth required');
     }
     const url = new URL(req.url, 'http://x');

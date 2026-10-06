@@ -64,3 +64,14 @@ test('missing template params rejected', async () => {
   assert.strictEqual((await call('POST', '/api/campaigns', { templateName: 'p', mapping: { name: 'x' } })).s, 400);
   app.server.close();
 });
+
+test('APP_USER enforced when set (including Arabic names)', async () => {
+  const app = createApp({ password: 'pw', user: 'رعد', dataFile: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'wa-')), 'd.json'), sent: {} });
+  await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
+  const base = 'http://127.0.0.1:' + app.server.address().port;
+  const hit = async (u, p) => (await fetch(base + '/api/state', { headers: { authorization: 'Basic ' + Buffer.from(u + ':' + p, 'utf8').toString('base64') } })).status;
+  assert.strictEqual(await hit('رعد', 'pw'), 200);
+  assert.strictEqual(await hit('other', 'pw'), 401);
+  assert.strictEqual(await hit('رعد', 'bad'), 401);
+  app.server.close();
+});
