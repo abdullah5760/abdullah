@@ -6,7 +6,7 @@
   "type": "commonjs",
   "engines": { "node": ">=20" },
   "scripts": {
-    "start": "node server.js",
+    "start": "node launch.js",
     "test": "node --test test/app.test.js"
   }
 }
